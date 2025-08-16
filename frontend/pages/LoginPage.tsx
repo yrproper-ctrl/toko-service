@@ -13,14 +13,17 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
   useEffect(() => {
+    setIsMounted(true);
+    
     // Check if user is already logged in
     try {
-      const userData = localStorage.getItem('user');
-      const token = localStorage.getItem('token');
+      const userData = localStorage?.getItem('user');
+      const token = localStorage?.getItem('token');
       if (userData && token) {
         const parsedUser = JSON.parse(userData);
         if (parsedUser && parsedUser.id && parsedUser.name && parsedUser.role && parsedUser.email) {
@@ -31,24 +34,35 @@ export default function LoginPage() {
     } catch (error) {
       console.error('Error checking existing login:', error);
       // Clear invalid data
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
+      try {
+        localStorage?.removeItem('user');
+        localStorage?.removeItem('token');
+      } catch (storageError) {
+        console.error('Error clearing localStorage:', storageError);
+      }
     }
   }, [navigate]);
 
   const loginMutation = useMutation({
     mutationFn: async (data: { email: string; password: string }) => {
+      if (!isMounted) return null;
+      
       setIsLoading(true);
       try {
-        return await backend.auth.login(data);
+        const result = await backend.auth.login(data);
+        return result;
       } catch (error) {
         console.error('Login API error:', error);
         throw error;
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     },
     onSuccess: (data) => {
+      if (!isMounted || !data) return;
+      
       try {
         if (!data || !data.user || !data.token) {
           throw new Error('Invalid response data');
@@ -58,88 +72,125 @@ export default function LoginPage() {
           throw new Error('Invalid user data');
         }
 
-        localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('token', data.token);
+        localStorage?.setItem('user', JSON.stringify(data.user));
+        localStorage?.setItem('token', data.token);
         
-        toast({
-          title: "Login berhasil",
-          description: `Selamat datang, ${data.user.name}!`,
-        });
+        if (toast) {
+          toast({
+            title: "Login berhasil",
+            description: `Selamat datang, ${data.user.name}!`,
+          });
+        }
         
         navigate('/dashboard');
       } catch (error) {
         console.error('Error processing login success:', error);
-        toast({
-          title: "Login gagal",
-          description: "Terjadi kesalahan saat memproses login",
-          variant: "destructive",
-        });
+        if (toast) {
+          toast({
+            title: "Login gagal",
+            description: "Terjadi kesalahan saat memproses login",
+            variant: "destructive",
+          });
+        }
       }
     },
     onError: (error: any) => {
+      if (!isMounted) return;
+      
       console.error('Login error:', error);
       let errorMessage = "Email atau password salah";
       
-      if (error && typeof error === 'object') {
-        if (error.message) {
-          errorMessage = error.message;
-        } else if (error.details) {
-          errorMessage = error.details;
+      try {
+        if (error && typeof error === 'object') {
+          if (error.message) {
+            errorMessage = error.message;
+          } else if (error.details) {
+            errorMessage = error.details;
+          }
         }
+      } catch (parseError) {
+        console.error('Error parsing error message:', parseError);
       }
       
-      toast({
-        title: "Login gagal",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      if (toast) {
+        toast({
+          title: "Login gagal",
+          description: errorMessage,
+          variant: "destructive",
+        });
+      }
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!isMounted) return;
+    
     if (!email || !password) {
-      toast({
-        title: "Error",
-        description: "Email dan password harus diisi",
-        variant: "destructive",
-      });
+      if (toast) {
+        toast({
+          title: "Error",
+          description: "Email dan password harus diisi",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
     if (!email.includes('@')) {
-      toast({
-        title: "Error",
-        description: "Format email tidak valid",
-        variant: "destructive",
-      });
+      if (toast) {
+        toast({
+          title: "Error",
+          description: "Format email tidak valid",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
     if (password.length < 3) {
-      toast({
-        title: "Error",
-        description: "Password minimal 3 karakter",
-        variant: "destructive",
-      });
+      if (toast) {
+        toast({
+          title: "Error",
+          description: "Password minimal 3 karakter",
+          variant: "destructive",
+        });
+      }
       return;
     }
 
-    loginMutation.mutate({ email: email.trim(), password: password.trim() });
+    try {
+      loginMutation.mutate({ email: email.trim(), password: password.trim() });
+    } catch (error) {
+      console.error('Error submitting login:', error);
+    }
   };
 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
+    if (!e || !e.target) return;
+    const value = e.target.value || '';
     setEmail(value);
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
+    if (!e || !e.target) return;
+    const value = e.target.value || '';
     setPassword(value);
   };
 
   const isSubmitting = isLoading || loginMutation.isPending;
+
+  if (!isMounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
