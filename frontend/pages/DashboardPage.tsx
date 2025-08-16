@@ -16,38 +16,89 @@ interface User {
 
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const userData = localStorage.getItem('user');
-    if (!userData) {
+    try {
+      const userData = localStorage.getItem('user');
+      if (!userData) {
+        navigate('/login');
+        return;
+      }
+      const parsedUser = JSON.parse(userData);
+      if (parsedUser && parsedUser.id && parsedUser.name && parsedUser.role && parsedUser.email) {
+        setUser(parsedUser);
+      } else {
+        console.error('Invalid user data:', parsedUser);
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        navigate('/login');
+        return;
+      }
+    } catch (error) {
+      console.error('Error parsing user data:', error);
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
       navigate('/login');
       return;
+    } finally {
+      setIsLoading(false);
     }
-    setUser(JSON.parse(userData));
   }, [navigate]);
 
-  const { data: servicesData } = useQuery({
+  const { data: servicesData, isError: servicesError } = useQuery({
     queryKey: ['services'],
-    queryFn: async () => await backend.service.listServices(),
+    queryFn: async () => {
+      try {
+        return await backend.service.listServices();
+      } catch (error) {
+        console.error('Error fetching services:', error);
+        throw error;
+      }
+    },
+    enabled: !!user,
+    retry: 1,
   });
 
   const handleLogout = () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('token');
-    navigate('/');
+    try {
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      navigate('/');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      navigate('/');
+    }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
-    return <div>Loading...</div>;
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-600">Redirecting to login...</p>
+        </div>
+      </div>
+    );
   }
 
   const services = servicesData?.services || [];
   const stats = {
     total: services.length,
-    terima: services.filter(s => s.status === 'terima').length,
-    proses: services.filter(s => s.status === 'proses').length,
-    selesai: services.filter(s => s.status === 'selesai').length,
+    terima: services.filter(s => s?.status === 'terima').length,
+    proses: services.filter(s => s?.status === 'proses').length,
+    selesai: services.filter(s => s?.status === 'selesai').length,
   };
 
   const getRoleColor = (role: string) => {
@@ -61,7 +112,7 @@ export default function DashboardPage() {
   };
 
   const canAccess = (requiredRoles: string[]) => {
-    return requiredRoles.includes(user.role);
+    return user && user.role && requiredRoles.includes(user.role);
   };
 
   return (
@@ -202,27 +253,40 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {services.slice(0, 5).map((service) => (
-                  <div key={service.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <p className="font-medium">{service.serviceCode}</p>
-                      <p className="text-sm text-gray-500">{service.customerName} - {service.itemType}</p>
-                    </div>
-                    <Badge className={
-                      service.status === 'terima' ? 'bg-blue-500' :
-                      service.status === 'proses' ? 'bg-yellow-500' :
-                      service.status === 'selesai' ? 'bg-green-500' :
-                      service.status === 'batal' ? 'bg-red-500' : 'bg-gray-500'
-                    }>
-                      {service.status === 'terima' ? 'Diterima' :
-                       service.status === 'proses' ? 'Proses' :
-                       service.status === 'selesai' ? 'Selesai' :
-                       service.status === 'batal' ? 'Batal' : 'Diambil'}
-                    </Badge>
+                {servicesError ? (
+                  <div className="text-center py-8 text-red-500">
+                    <p>Error loading services. Please try refreshing the page.</p>
                   </div>
-                ))}
-                {services.length === 0 && (
-                  <p className="text-center text-gray-500 py-8">Belum ada data service</p>
+                ) : services.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>Belum ada data service</p>
+                  </div>
+                ) : (
+                  services.slice(0, 5).map((service) => {
+                    if (!service || !service.id) return null;
+                    
+                    return (
+                      <div key={service.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div>
+                          <p className="font-medium">{service.serviceCode || 'N/A'}</p>
+                          <p className="text-sm text-gray-500">
+                            {service.customerName || 'N/A'} - {service.itemType || 'N/A'}
+                          </p>
+                        </div>
+                        <Badge className={
+                          service.status === 'terima' ? 'bg-blue-500' :
+                          service.status === 'proses' ? 'bg-yellow-500' :
+                          service.status === 'selesai' ? 'bg-green-500' :
+                          service.status === 'batal' ? 'bg-red-500' : 'bg-gray-500'
+                        }>
+                          {service.status === 'terima' ? 'Diterima' :
+                           service.status === 'proses' ? 'Proses' :
+                           service.status === 'selesai' ? 'Selesai' :
+                           service.status === 'batal' ? 'Batal' : 'Diambil'}
+                        </Badge>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </CardContent>
