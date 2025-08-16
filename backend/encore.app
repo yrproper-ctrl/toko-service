@@ -1,0 +1,1 @@
+{"id": "computer-repair-shop-pb22", "lang": "typescript"}
