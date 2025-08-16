@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -12,27 +12,85 @@ import backend from '~backend/client';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  useEffect(() => {
+    // Check if user is already logged in
+    try {
+      const userData = localStorage.getItem('user');
+      const token = localStorage.getItem('token');
+      if (userData && token) {
+        const parsedUser = JSON.parse(userData);
+        if (parsedUser && parsedUser.id && parsedUser.name && parsedUser.role && parsedUser.email) {
+          navigate('/dashboard');
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error checking existing login:', error);
+      // Clear invalid data
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+    }
+  }, [navigate]);
+
   const loginMutation = useMutation({
     mutationFn: async (data: { email: string; password: string }) => {
-      return await backend.auth.login(data);
+      setIsLoading(true);
+      try {
+        return await backend.auth.login(data);
+      } catch (error) {
+        console.error('Login API error:', error);
+        throw error;
+      } finally {
+        setIsLoading(false);
+      }
     },
     onSuccess: (data) => {
-      localStorage.setItem('user', JSON.stringify(data.user));
-      localStorage.setItem('token', data.token);
-      toast({
-        title: "Login berhasil",
-        description: `Selamat datang, ${data.user.name}!`,
-      });
-      navigate('/dashboard');
+      try {
+        if (!data || !data.user || !data.token) {
+          throw new Error('Invalid response data');
+        }
+
+        if (!data.user.id || !data.user.name || !data.user.role || !data.user.email) {
+          throw new Error('Invalid user data');
+        }
+
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('token', data.token);
+        
+        toast({
+          title: "Login berhasil",
+          description: `Selamat datang, ${data.user.name}!`,
+        });
+        
+        navigate('/dashboard');
+      } catch (error) {
+        console.error('Error processing login success:', error);
+        toast({
+          title: "Login gagal",
+          description: "Terjadi kesalahan saat memproses login",
+          variant: "destructive",
+        });
+      }
     },
     onError: (error: any) => {
       console.error('Login error:', error);
+      let errorMessage = "Email atau password salah";
+      
+      if (error && typeof error === 'object') {
+        if (error.message) {
+          errorMessage = error.message;
+        } else if (error.details) {
+          errorMessage = error.details;
+        }
+      }
+      
       toast({
         title: "Login gagal",
-        description: "Email atau password salah",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -40,6 +98,7 @@ export default function LoginPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!email || !password) {
       toast({
         title: "Error",
@@ -48,8 +107,39 @@ export default function LoginPage() {
       });
       return;
     }
-    loginMutation.mutate({ email, password });
+
+    if (!email.includes('@')) {
+      toast({
+        title: "Error",
+        description: "Format email tidak valid",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (password.length < 3) {
+      toast({
+        title: "Error",
+        description: "Password minimal 3 karakter",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    loginMutation.mutate({ email: email.trim(), password: password.trim() });
   };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setEmail(value);
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setPassword(value);
+  };
+
+  const isSubmitting = isLoading || loginMutation.isPending;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -78,9 +168,11 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={handleEmailChange}
                   placeholder="admin@techrepair.com"
                   required
+                  disabled={isSubmitting}
+                  autoComplete="email"
                 />
               </div>
               <div className="space-y-2">
@@ -89,29 +181,33 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={handlePasswordChange}
                   placeholder="••••••••"
                   required
+                  disabled={isSubmitting}
+                  autoComplete="current-password"
                 />
               </div>
               <Button 
                 type="submit" 
                 className="w-full" 
-                disabled={loginMutation.isPending}
+                disabled={isSubmitting}
               >
                 <LogIn className="mr-2 h-4 w-4" />
-                {loginMutation.isPending ? 'Logging in...' : 'Login'}
+                {isSubmitting ? 'Logging in...' : 'Login'}
               </Button>
             </form>
           </CardContent>
         </Card>
 
         <div className="mt-6 text-center text-sm text-gray-600">
-          <p>Demo Accounts:</p>
-          <p>Admin: admin@techrepair.com / admin123</p>
-          <p>CS: cs@techrepair.com / cs123</p>
-          <p>Teknisi: teknisi@techrepair.com / teknisi123</p>
-          <p>Kasir: kasir@techrepair.com / kasir123</p>
+          <p className="font-medium mb-2">Demo Accounts:</p>
+          <div className="space-y-1">
+            <p>Admin: admin@techrepair.com / admin123</p>
+            <p>CS: cs@techrepair.com / cs123</p>
+            <p>Teknisi: teknisi@techrepair.com / teknisi123</p>
+            <p>Kasir: kasir@techrepair.com / kasir123</p>
+          </div>
         </div>
       </div>
     </div>
