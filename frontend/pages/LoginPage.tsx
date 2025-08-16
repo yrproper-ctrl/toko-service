@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -17,31 +17,98 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  useEffect(() => {
-    setIsMounted(true);
-    
-    // Check if user is already logged in
-    try {
-      const userData = localStorage?.getItem('user');
-      const token = localStorage?.getItem('token');
-      if (userData && token) {
-        const parsedUser = JSON.parse(userData);
-        if (parsedUser && parsedUser.id && parsedUser.name && parsedUser.role && parsedUser.email) {
-          navigate('/dashboard');
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Error checking existing login:', error);
-      // Clear invalid data
+  // Safe localStorage access
+  const safeLocalStorage = {
+    getItem: (key: string) => {
       try {
-        localStorage?.removeItem('user');
-        localStorage?.removeItem('token');
-      } catch (storageError) {
-        console.error('Error clearing localStorage:', storageError);
+        return localStorage?.getItem(key) || null;
+      } catch (error) {
+        console.warn('localStorage access failed:', error);
+        return null;
+      }
+    },
+    setItem: (key: string, value: string) => {
+      try {
+        localStorage?.setItem(key, value);
+        return true;
+      } catch (error) {
+        console.warn('localStorage write failed:', error);
+        return false;
+      }
+    },
+    removeItem: (key: string) => {
+      try {
+        localStorage?.removeItem(key);
+        return true;
+      } catch (error) {
+        console.warn('localStorage remove failed:', error);
+        return false;
       }
     }
-  }, [navigate]);
+  };
+
+  // Safe JSON parsing
+  const safeJsonParse = useCallback((jsonString: string | null) => {
+    if (!jsonString) return null;
+    try {
+      return JSON.parse(jsonString);
+    } catch (error) {
+      console.warn('JSON parse failed:', error);
+      return null;
+    }
+  }, []);
+
+  // Safe toast function
+  const safeToast = useCallback((options: any) => {
+    try {
+      if (toast && typeof toast === 'function') {
+        toast(options);
+      }
+    } catch (error) {
+      console.warn('Toast failed:', error);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    const initializeComponent = async () => {
+      try {
+        if (!mounted) return;
+        
+        setIsMounted(true);
+        
+        // Check if user is already logged in
+        const userData = safeLocalStorage.getItem('user');
+        const token = safeLocalStorage.getItem('token');
+        
+        if (userData && token) {
+          const parsedUser = safeJsonParse(userData);
+          if (parsedUser && 
+              parsedUser.id && 
+              parsedUser.name && 
+              parsedUser.role && 
+              parsedUser.email) {
+            if (mounted) {
+              navigate('/dashboard');
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking existing login:', error);
+        // Clear invalid data
+        safeLocalStorage.removeItem('user');
+        safeLocalStorage.removeItem('token');
+      }
+    };
+
+    initializeComponent();
+
+    return () => {
+      mounted = false;
+    };
+  }, [navigate, safeLocalStorage, safeJsonParse]);
 
   const loginMutation = useMutation({
     mutationFn: async (data: { email: string; password: string }) => {
@@ -72,26 +139,26 @@ export default function LoginPage() {
           throw new Error('Invalid user data');
         }
 
-        localStorage?.setItem('user', JSON.stringify(data.user));
-        localStorage?.setItem('token', data.token);
+        const userSaved = safeLocalStorage.setItem('user', JSON.stringify(data.user));
+        const tokenSaved = safeLocalStorage.setItem('token', data.token);
         
-        if (toast) {
-          toast({
-            title: "Login berhasil",
-            description: `Selamat datang, ${data.user.name}!`,
-          });
+        if (!userSaved || !tokenSaved) {
+          throw new Error('Failed to save login data');
         }
+        
+        safeToast({
+          title: "Login berhasil",
+          description: `Selamat datang, ${data.user.name}!`,
+        });
         
         navigate('/dashboard');
       } catch (error) {
         console.error('Error processing login success:', error);
-        if (toast) {
-          toast({
-            title: "Login gagal",
-            description: "Terjadi kesalahan saat memproses login",
-            variant: "destructive",
-          });
-        }
+        safeToast({
+          title: "Login gagal",
+          description: "Terjadi kesalahan saat memproses login",
+          variant: "destructive",
+        });
       }
     },
     onError: (error: any) => {
@@ -112,51 +179,43 @@ export default function LoginPage() {
         console.error('Error parsing error message:', parseError);
       }
       
-      if (toast) {
-        toast({
-          title: "Login gagal",
-          description: errorMessage,
-          variant: "destructive",
-        });
-      }
+      safeToast({
+        title: "Login gagal",
+        description: errorMessage,
+        variant: "destructive",
+      });
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     
     if (!isMounted) return;
     
     if (!email || !password) {
-      if (toast) {
-        toast({
-          title: "Error",
-          description: "Email dan password harus diisi",
-          variant: "destructive",
-        });
-      }
+      safeToast({
+        title: "Error",
+        description: "Email dan password harus diisi",
+        variant: "destructive",
+      });
       return;
     }
 
     if (!email.includes('@')) {
-      if (toast) {
-        toast({
-          title: "Error",
-          description: "Format email tidak valid",
-          variant: "destructive",
-        });
-      }
+      safeToast({
+        title: "Error",
+        description: "Format email tidak valid",
+        variant: "destructive",
+      });
       return;
     }
 
     if (password.length < 3) {
-      if (toast) {
-        toast({
-          title: "Error",
-          description: "Password minimal 3 karakter",
-          variant: "destructive",
-        });
-      }
+      safeToast({
+        title: "Error",
+        description: "Password minimal 3 karakter",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -165,19 +224,19 @@ export default function LoginPage() {
     } catch (error) {
       console.error('Error submitting login:', error);
     }
-  };
+  }, [isMounted, email, password, loginMutation, safeToast]);
 
-  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e || !e.target) return;
+  const handleEmailChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e?.target) return;
     const value = e.target.value || '';
     setEmail(value);
-  };
+  }, []);
 
-  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e || !e.target) return;
+  const handlePasswordChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e?.target) return;
     const value = e.target.value || '';
     setPassword(value);
-  };
+  }, []);
 
   const isSubmitting = isLoading || loginMutation.isPending;
 
